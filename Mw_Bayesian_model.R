@@ -1,361 +1,337 @@
 
 #------------------------------------------------------------------------------#
-# Title: Bayesian Belief (Decision) Network for Mwache Dam design
+# Title: Bayesian Belief Network for the Mwache project design
 # By:    M.Umit Taner
-# Date:  September, 2015                                                       
+# Date:  September, 2015
 #------------------------------------------------------------------------------#
 
   #install.packages("devtools")
   #library(devtools)
   #install_github("ecbrown/LaplacesDemon")
 
+##############################################################################
+#CLIMATE PROBABILITIES
 
-  #Load associated data
-  load("Inputs/Mb_StressTest.Rdata")
-  load("Inputs/Mb_Climate.Rdata")
-  source("/Users/umit/GDrive/Research/Scripts/SAMPLING.R")
-  source("/Users/umit/GDrive/Research/Scripts/MULTIPLOT.R")
-  require(devtools)
-  require(LaplacesDemon)
-  require(mvtnorm)
-  require(truncnorm)
-  require(lazyeval)
-  require(readxl)
 
-  
-  
-# BAYESIAN BELIEF NETWORK ******************************************************
+  source("Mw_Input_pars.R")
+  script_dir <- "/Users/umit/Dropbox/Research/Scripts/"
+  source(paste0(script_dir, "BAYESNET.R"))
 
-# Step 1. |Define nodes, edges, and significance weights
-# Step 2. |Define prior probabilities of the nodes
-# Step 3. |Populate CPTs by weighted sums algrorithm
-# Step 4. |Apply LHS sampling to approximate PMFs
 
-  
-################################################################################  
-  
-  
-# STEP 1) NODES - EDGES - RANKING ----------------------------------------------
+gcm_dat <- gcms_data %>%
+  as_data_frame() %>%
+  filter(Ensemble == "CMIP5") %>%
+  select(Index, Temp_Abs, Prec_Abs) %>%
+  mutate(Delta_Temp = Temp_Abs - hist_clim$Temp,
+         Delta_Prec = Prec_Abs / hist_clim$Prec)
 
-  
-  #*****************************************************************************
-  
-  #Define nodes in the system
-  nodes  <- c(
-    "Equakes",  "ClimChange", "ClimVar",  "DiscRate",
-    "Develop",  "Population", "Capacity", "Sediment",
-    "PCDemand", "PriceWater", "LifeSpan")
-  
-  #*****************************************************************************
-  
-  #Define parent-child relationships between the nodes (NA means no parent)
-  edges <- list(
-    Equakes    = NA,
-    ClimChange = NA,
-    ClimVar    = NA,
-    DiscRate   = NA,
-    Develop    = NA,
-    Population = NA,
-    Capacity   = NA,
-    Sediment   = c("ClimChange", "ClimVar"),
-    PCDemand   = c("ClimChange", "ClimVar", "Develop", "Capacity"),
-    PriceWater = c("Develop", "PCDemand", "Capacity"),
-    LifeSpan   = c("Equakes", "Sediment", "Capacity"))
+#Fit gcm data to a distribution, get mu and sigma
+gcm_mu <- as.vector(apply(gcm_dat[,c("Delta_Temp","Delta_Prec")], 2, mean))
+gcm_covv <- cov(cbind(gcm_dat$Delta_Temp, gcm_dat$Delta_Prec)) * 20
 
-  #*****************************************************************************
+#climate probability matrix, ordered from driest
+clim_priors <- as_data_frame(clim_matrix) %>%
+  mutate(c = Clim, Delta_Prec = Prec/100, Delta_Temp = Tavg) %>%
+  select(c, Delta_Prec, Delta_Temp, NVar) %>%
+  mutate(P = dmvc(x = cbind(.$Delta_Temp, .$Delta_Prec), mu=gcm_mu, S=gcm_covv)) %>%
+  mutate(P = P / length(unique(.$NVar))) %>%
+  mutate(P = P / sum(P)) %>%
+  arrange(Delta_Prec, desc(Delta_Temp)) %>%
+  mutate(Climate = 1:n()) %>%
+  select(Climate, c, Delta_Prec, Delta_Temp, NVar, P)
 
-  #Define the strengths of the parent-child relationshps
-  edge_weights <- list(
-    Equakes    = NA,
-    ClimChange = NA,
-    ClimVar    = NA,
-    DiscRate   = NA,
-    Develop    = NA,
-    Population = NA,
-    Capacity   = NA,
-    Sediment   = c(2, 3),
-    PCDemand   = c(1, 3, 2, 5),
-    PriceWater = c(2, 4, 2),
-    LifeSpan   = c(1, 3, 5))
-  
-  #*****************************************************************************
-  
-  
+clim_prior_tbl <- clim_priors %>%
+  select(Climate, Delta_Prec, Delta_Temp, P) %>%
+  group_by(Delta_Prec, Delta_Temp) %>%
+  summarize(P = sum(P))
 
-  
-################################################################################
-  
-  
-# STEP 2) PRIOR PROBABILITIES  -------------------------------------------------
+p <- ggplot(clim_prior_tbl) +
+  geom_tile(aes(x = Delta_Temp, y = Delta_Prec*100, fill = P), color = "black") +
+  scale_x_continuous(expand=c(0,0), breaks = seq(0,2.5, 0.5)) +
+  scale_y_continuous(expand=c(0,0), breaks = seq(70, 140, 10)) +
+  scale_fill_gradient(
+    low = "white", high = "black", name = "Probability", guide = "legend",
+    limits = c(0, 0.06), breaks = seq(0, 0.06, 0.01)) +
+  labs(x=alabels[1], y=alabels[2]) +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid.minor  = element_blank(),
+    panel.grid.major  = element_blank(),
+    plot.title        = element_text(face="bold"),
+    legend.background = element_rect(fill=NA),
+    panel.border      = element_rect(color="black", fill=NA),
+    strip.background  = element_rect(fill="white", color='black'),
+    panel.margin      = unit(1, "lines"),
+    plot.title = element_text(face="bold"))
 
-  # First define a prior probability table for each node. The tables
-  # should include Vlevel, Scale, Prior columns
-  # All variable levels are scaled to the interval [0,1]
+ggsave(file = "climate_probs.png", plot = p, height =5, width = 6)
 
-  ClimGCMs <- filter(gcms_data, Ensemble == "CMIP5") %>% 
-    select(x=Temp_Abs, y= Prec_Abs)
-  ClimGCMs_mean <- as.vector(apply(ClimGCMs, 2, mean))
-  ClimGCMs_sdev <- cov(cbind(ClimGCMs$x, ClimGCMs$y))
-  Prior = dmvc(x  = as.matrix(select(cc_space, Temp, Prec)), 
-               mu = ClimGCMs_mean, S= ClimGCMs_sdev)
-  Prior = Prior/sum(Prior)
-  
-  #Store node level information and prior probabilities
+##############################################################################
+
+
+
+# DATA -------------------------------------------------------------------------
+
+  clim_response_dat <-  read.csv('./inputs/safeyield_Sep25.csv')
+  bn <- read_excel(path="./inputs/MwBN_data.xlsx", sheet = "Nodes", skip =1)
+  edges_dat <- read_excel(path="./inputs/MwBN_data.xlsx", sheet = "Edges", skip =1)
+  signs_dat <- read_excel(path="./inputs/MwBN_data.xlsx", sheet = "Signs", skip =1)
+
+  nodes <- bn$Variable
+
+  edges <- setNames(sapply(1:length(nodes),
+    function(x) nodes[which(edges_dat[x,-1] != 0)]), nodes)
+
+  weights <- setNames(sapply(1:length(bn$Variable), function(x)
+    unlist((edges_dat[x, which(edges_dat[x,] != 0)])[-1], use.names = FALSE)),
+    bn$Variable)
+
+  signs <- setNames(sapply(1:length(bn$Variable), function(x)
+    unlist((signs_dat[x, which(signs_dat[x,] != 0)])[-1], use.names = FALSE)),
+    bn$Variable)
+
   node_priors <- list()
+  node_priors$Equake   <- c(0.001, 0.999)
+  node_priors$Climate  <- clim_priors$P
+  node_priors$Discount <- c(0.236, 0.378, 0.271, 0.106, 0.009)
+  node_priors$Econdev  <- c(0.106, 0.247, 0.294, 0.247, 0.106)
+  node_priors$Capacity <- c(0.166, 0.167, 0.167, 0.167, 0.167, 0.166)
 
-  #Node 1, Earthquake (catastrophic events) ************************************
-  node_priors[["Equakes"]] <- data_frame(Level = c("True", "False")) %>%
-    mutate(Scale = seq(1/(2*n()), by = 1/(n()), length.out = n()),
-           Prior = c(0.001, 0.999))
+  ############### NO-climate change!!!!
+  #bn$min_bound[2] <- 1
+  #bn$max_bound[2] <- 10
+  #bn$state_num[2] <- 10
+  #node_priors$Climate  <- rep(0.1, 10)
+  #####################################
 
-  #Node 2, Mean Climate change (DeltaP, DeltaT change) *************************
-  node_priors[["ClimChange"]] <- data_frame(
-      Level = paste0("cc",1:48))%>%
-    mutate(Scale = seq(1/(2*n()), by = 1/(n()), length.out = n()),
-           Prior = Prior)
+  #sapply(node_priors, sum)
+  #sapply(node_priors, length)
 
-  #Node 3, Natural Climate variability *****************************************
-  node_priors[["ClimVar"]] <- data_frame(
-      Level = paste0("tr",1:10)) %>%
-    mutate(Scale = seq(1/(2*n()), by = 1/(n()), length.out = n()),
-           Prior = rep(1/n(), n()))
+  ##############################################################################
 
-  #Node 4, economic discount rate **********************************************
-  node_priors[["DiscRate"]] <- data_frame(
-      Level = c("Low", "Med", "High"),
-      Value = c(0.03, 0.05, 0.08)) %>%
-    mutate(Scale = seq(1/(2*n()), by = 1/(n()), length.out = n()),
-           Prior = c(0.35, 0.4, 0.25))
-
-  #Node 5, future economic development *****************************************
-  node_priors[["Develop"]] <- data_frame(
-      Level = c("Low", "Med", "High"),
-      Value = c("Low", "Med", "High")) %>%
-    mutate(Scale = seq(1/(2*n()), by = 1/(n()), length.out = n()),
-           Prior = c(0.3, 0.4, 0.3))
-
-  #Node 6, future population ***************************************************
-  node_priors[["Population"]] <- data_frame(
-      Level = c("Low", "Med", "High"),
-      Value = c(3e6, 3.5e6, 4e6)) %>%
-    mutate(Scale = seq(1/(2*n()), by = 1/(n()), length.out = n()),
-           Prior = c(0.3, 0.4, 0.3))
-
-  #Node 7, Sedimentation and siltation *****************************************
-  node_priors[["Sediment"]] <- data_frame(
-    Level = c("Low", "Med", "High"),
-    Value = c("NA","NA","NA")) %>%
-    mutate(Scale = seq(1/(2*n()), by = 1/(n()), length.out = n()),
-           Prior = c(0.5, 0.4, 0.1))
-
-  #Node 8, Per Capita Water Demand *********************************************
-  node_priors[["PCDemand"]] <- data_frame(
-      Level = c("Low", "Med", "High"),
-      Value = c("NA","NA","NA")) %>%
-    mutate(Scale = seq(1/(2*n()), by = 1/(n()), length.out = n()),
-           Prior = c(0.3, 0.5, 0.2))
-
-  #Node 9, Per Capita Water Demand *********************************************
-  node_priors[["PriceWater"]] <- data_frame(
-      Level = c("Low", "Med", "High"),
-      Value = c("NA","NA","NA")) %>%
-    mutate(Scale = seq(1/(2*n()), by = 1/(n()), length.out = n()),
-           Prior = c(0.3, 0.4, 0.3))
-
-  #Node 10, Life span of the Reservoir *****************************************
-  node_priors[["LifeSpan"]] <- data_frame(
-      Level = c("Low", "Med", "High"),
-      Value = c("NA","NA","NA")) %>%
-    mutate(Scale = seq(1/(2*n()), by = 1/(n()), length.out = n()),
-           Prior = c(0.6, 0.3, 0.1))
-
-  #Node 11, Reservoir capacity (decision node) *********************************
-  node_priors[["Capacity"]] <- data_frame(
-      Level = seq(40,140,20),
-      Value = c("NA","NA","NA","NA","NA","NA")) %>%
-    mutate(Scale = seq(1/(2*n()), by = 1/(n()), length.out = n()),
-           Prior = rep(1/length(Scale), length(Scale)))
-
-  
-################################################################################
-
-  
-# STEP 3) CONDITIONAL PROBABILITY TABLES (CPTs) --------------------------------
-  mw_CPTs <- list()
-
-  # Create CPT tables for each node in the system
-  # Start with the first node, propogate CPT tables
-  for (n in 1:length(nodes)) {
-
-    #Current node
-    node_name  <-  nodes[n]
-    node_level <- node_priors[[node_name]]$Level
-    node_scale <- node_priors[[node_name]]$Scale
-    node_parents <- edges[[n]]
-
-    #If node does not have any parents, use the prior table
-    if(is.na(node_parents)[1]) {
-
-      mw_CPTs[[node_name]] <- node_priors[[node_name]] %>%
-        select(Level = Scale, Prob = Prior)
-
-    #If node has parents, propogate the CPTs
-    } else  {
-
-      #Parent nodes
-      parent_level <- lapply(node_parents, function(x) node_priors[[x]]$Level)
-      parent_scale <- lapply(node_parents, function(x) node_priors[[x]]$Scale)
-      parent_wghts <- edge_weights[[n]]
-
-      #Template CPT table
-      CPT_level <- expand.grid(parent_level)
-      CPT_scale <- expand.grid(parent_scale)
-      colnames(CPT_level) <- node_parents
-      colnames(CPT_scale) <- node_parents
-
-      CPT_template <- merge(CPT_scale, node_scale, by=NULL) %>%
-        as_data_frame() %>% mutate(Prob = NA)
-      colnames(CPT_template) <- c(node_parents, "Level", "Prob")
-
-      #Loop through each level combination to propogate probabilities
-      for (i in 1:nrow(CPT_template)) {
-
-        output_vals <- CPT_template[[i,"Level"]]
-        parent_vals <- as.vector(unlist(CPT_template[i,node_parents]))
-
-        CPT_template[i,"Prob"] <- dtruncnorm(
-          output_vals,
-          mean = sum(parent_vals * parent_wghts)/sum(parent_wghts),
-          sd = 1/sum(parent_wghts), a = 0, b = 1)
-
-      }
-
-    #Normalize CPT based on their conditionals
-    dots <- lapply(node_parents, as.symbol)
-    CPT_template2 <- suppressMessages(CPT_template %>%
-      group_by_(.dots= dots) %>%
-      summarize(normf = sum(Prob)) %>%
-      left_join(CPT_template, .) %>%
-      mutate(Prob = Prob/normf)) %>%
-      select(-normf)
-
-    #Final CPT for the node
-    mw_CPTs[[node_name]] <- CPT_template2
-
-    }
-  }
-
-  
-################################################################################
-
-  
-# STEP 4) LATIN HYPERCUBE SAMPLING (LHS) ---------------------------------------
-
-  edges <- edges
-  CPTs  <- mw_CPTs
-  ssize <- 200
+  sample_size <- 10000
+  #variance_coef = 1
 
   #Arguments for BN sampling
-  LHS_scale <- list()
-  LHS_org <- list()
+  LHS_scaled <- list()
+  LHS_actual <- list()
+
+  #Probabilities are conditional here....
+  BN_pars <- NPT_GENERATE(nodes = bn$Variable,
+    min_bounds = bn$min_bound, max_bounds = bn$max_bound,
+    state_nums = bn$state_num, node_priors  = node_priors,
+    node_links = edges, edge_weights = weights,
+    edge_signs = signs, variance_coef= 0.2)
+
+  #sapply(BN_pars$NPT, function(x) sum(x[["P"]]))
+  #sapply(node_priors, sum)
+  #sapply(node_priors, length)
 
   ptm <- proc.time()
+
   #Apply sampling (rescaled interval 0-1)
-  for (i in 1:nrow(designs)) {
+  for (i in 1:6) {
 
     #Sampled nodes (scaled to 0-1 interval)
-    LHS_scale[[i]] <- BN_SAMPLING(sample_size = ssize,
-      decision = list(Capacity = mw_CPTs$Capacity$Level[i]),
-      nodes = nodes,
-      CPTs = mw_CPTs,
-      edges = edges)
+    LHS_scaled[[i]] <- BAYESNET_LHS(
+      sample_size = sample_size,
+      decision    = list(Capacity = i),
+      nodes       = nodes,
+      CPTs        = BN_pars$NPT,
+      edges       = edges)
+
+    LHS_index <- LHS_scaled[[i]][[2]]
+
+    #Retrieve actual levels from the scaled intervals
+    LHS_actual[[i]] <- sapply(1:length(BN_pars$Levels), function(x)
+       BN_pars$Levels[[x]][LHS_index[[x]]]) %>%
+       as.data.frame() %>% as_data_frame()
+
+    colnames(LHS_actual[[i]]) <- nodes
+
   }
+
   proc.time() - ptm
 
-  ptm <- proc.time()
-  #Sampled nodes (Original internval)
-  for (i in 1:nrow(designs)) {
-    LHS_org[[i]] <- sapply(nodes, function(y)
-      sapply(1:nrow(LHS_scale[[i]]), function(x)
-        node_priors[[y]][[match(LHS_scale[[i]][[x,y]], node_priors[[y]]$Scale),"Level"]])) %>%
-      as.data.frame() %>% as_data_frame()
-  }
-  proc.time() - ptm
 
-
-  
-  
-  
-  
-    
-  
-################################################################################    
-################################################################################    
-################################################################################    
-################################################################################  
-################################################################################  
-  
-#STAKEHOLDER INFORMATION 
-
-  #Plots to be saved    
-  require(xtable)
-  
-  #Belief data 
-  belief_df <- read_excel("inputs/Workshop_survey_v2.xlsx", sheet = 1) %>%
-    gather(key = Particip, value = value, x1:x28) %>%
-    mutate(value = as.factor(.$value))
-  
-  belief_sum <- belief_df %>%
-    mutate(Value2 = as.numeric(value)) %>%
-    group_by(Uncertainty, Short) %>%
-    summarize(Mean = round(mean(Value2)))
-
-  
-  #Belief data plots
-  p <- list()
-  for (i in 1:12) {
-    
-    plot_name <- unique(belief_df$Uncertainty)[i]
-    plot_data <- filter(belief_df, Uncertainty == plot_name)
-    
-    p[[i]] <- ggplot(plot_data, aes(x = value, fill = Short)) +
-      ggtitle(plot_name) +
-      geom_bar(width=.7) +
-      facet_grid(.~ Short) +
-      scale_x_discrete(expand=c(0,0)) +
-      scale_y_discrete(expand=c(0,0)) +
-      labs(x="", y = "") +
-      theme(plot.title = element_text(face="bold"),
-            plot.margin = unit(c(0,0,0,0),"mm")) +
-      guides(fill = FALSE)  
-
-    ggsave(paste0("./Results_in_progress/factor_",i,".png"), p[[i]], width = 8, height = 2.5, units = "in")
-    
-  }
-  
-  
-  
-  
-  
-  
-  
 ################################################################################
-# #Profiling
-# Rprof("BN_sample.out")
-# 
-# ptm1 <- proc.time()
-# LHS1<- BN_SAMPLING(sample_size = 500,
-#     decision = list(Capacity = mw_CPTs$Capacity$Level[i]),
-#     nodes = nodes,
-#     CPTs = mw_CPTs,
-#     edges = edges)
-# time1 <- proc.time() - ptm1
-# 
-# ptm2 <- proc.time()
-# LHS_samples <- BN_SAMPLING2(sample_size = 2000,
-#     decision = list(Capacity = mw_CPTs$Capacity$Level[i]),
-#     nodes = nodes,
-#     CPTs = mw_CPTs,
-#     edges = edges)
-# time2 <- proc.time() - ptm2
+################################################################################
+################################################################################
+
+
+#POSTERIOR DISTRIBUTIONS
+
+  for (d in 1:6) {
+
+    sample_dat <- LHS_actual[[d]] %>% gather(key = node, value = value)
+
+    p <- list()
+
+    for (i in 1:length(nodes)) {
+
+      df <- filter(sample_dat, node == nodes[i])
+      df$value <- as.factor(df$value)
+
+      p[[i]] <-  ggplot(df, aes(x=value, fill = value)) +
+        #theme_bw(base_size = 10) +
+        ggtitle(paste0("(",i,") ", bn$Definition[i])) +
+        geom_bar(aes(y = (..count..)/sum(..count..)),
+                       fill ="gray55", color = "black", width = 0.8) +
+        #scale_y_continuous(expand=c(0,0)) +
+        scale_x_discrete(drop=FALSE) +
+        labs(x = "levels", y = "frequency") +
+        theme(plot.title = element_text(face="bold")) +
+        guides(fill = FALSE)
+
+    }
+
+  fig_name  <- paste0("./posteriors/posteriors_design_",d,".png")
+  fig_title <- paste0("Storage capacity:", designs$Labels[d])
+
+  out <- arrangeGrob(p[[6]], p[[7]], p[[8]], p[[9]], ncol=2,
+    top=textGrob(fig_title, gp=gpar(fontsize=20,font=3), just = "centre"))
+
+  ggsave(filename = fig_name, out, width = 10, height = 10)
+
+  }
+
+
+################################################################################
+################################################################################
+################################################################################
+
+
+  # PERFORMANCE METRIC PLOTS ---------------------------------------------------
+
+  clim_subset <- clim_matrix %>% as_data_frame() %>%
+    mutate(c = Clim) %>% select(-Clim)
+
+  syield <- read.csv('./inputs/safeyield_Sep25.csv') %>%
+    as_data_frame() %>%
+    left_join(clim_priors, by = "c") %>%
+    select(Climate, d, yield)
+    #left_join(clim_subset, by = "c") %>%
+    #filter(CC == 19) %>%
+    #select(d, Climate = NVar, yield)
+
+
+  NPV_tbl <- bind_rows(LHS_actual, .id ="d") %>%
+    mutate(d = as.integer(d), Climate = as.integer(Climate)) %>%
+    left_join(syield, by = c("d","Climate")) %>%
+    mutate(AnnB = yield * Valuewater) %>%
+    rowwise() %>%
+    mutate(PVB  = PV_CALCULATE(rep(AnnB, Lifespan), r=Discount),
+           NPV  = PVB - designs$PVCost[d]) %>%
+    ungroup()
+
+
+  #NPV_tbl <- vuly_df
+
+
+  #Joint probability distribution of NPV
+  NPV_posterior_cdf <- NPV_tbl %>%
+    select(d, NPV) %>%
+    mutate(d = ordered(.$d, labels = designs$Labels)) %>%
+    group_by(d) %>%
+    arrange(desc(NPV)) %>%
+    mutate(Index = 1:n(), ExP = Index/(n()+1))
+
+  options(scipen=3)
+
+  ### Density function
+  p1 <- ggplot(NPV_posterior_cdf, aes(x=NPV, group=d, color=d)) +
+    theme_bw() +
+    stat_density(position = "identity", fill=NA, trim = TRUE, size = 1) +
+    scale_color_brewer(name="Designs Capacities", palette="Spectral") +
+    labs(x="NPV (Million dollars)", y = "frequency"); p1
+
+  p2 <- ggplot(NPV_posterior_cdf, aes(x=ExP, y=NPV, group=d, color=d)) +
+    theme_bw() +
+    geom_line(size=1) +
+    scale_color_brewer(name="Designs Capacities", palette="Spectral") +
+    scale_x_continuous(limits=c(0,1), breaks=seq(0,1,0.1), expand=c(0,0)) +
+    geom_vline(xintercept=0.90, linetype='dashed') +
+    labs(x="Probability of exceedance", y = "NPV (M$)") ; p2
+
+  #ggsave(file="NPV_posterior_pdf.png", plot = p1, width=25, height=10, unit='cm')
+
+  #save.image("Results_10000_nocc_posteriors.Rdata")
+
+################################################################################
+################################################################################
+################################################################################
+
+
+
+  # DECISION CRITERIA **********************************************************
+  ##############################################################################
+
+  #cVaR calculations ********************
+  alpha_values <- c(0, 0.50, 0.75, 0.90, 0.95, 0.99)
+
+  metrics <- data_frame(Metric = alpha_values,
+    "40 MCM" = NA,  "60 MCM" = NA, "80 MCM" = NA,
+    "100 MCM" = NA, "120 MCM" = NA, "140 MCM" = NA)
+
+  for (i in 1:nrow(designs)) {
+
+    data <- filter(NPV_posterior_cdf, d == designs$Labels[i])
+    ind <- sapply(alpha_values, function(x) which.min(abs(data$ExP - x)):nrow(data))
+    metrics[,i+1] <- sapply(ind, function(x) sum(data[x, "NPV"]) / length(x))
+  }
+
+  metrics_df <- metrics %>% gather(key = Designs, value = value, -Metric)
+
+  metric_tbl <- metrics %>% slice(c(1,2,4))
+
+  #write.csv(metric_tbl, file = "metric_10000_cc_uniform.csv")
+
+  ggplot(metrics_df, aes(x=Metric, y=cVaR, color=Designs)) +
+    theme_bw() +
+    geom_line(size=1)
+
+  filter(metrics_df, Metric %in% c(0,0.90))
+
+
+
+################################################################################
+################################################################################
+################################################################################
+################################################################################
+################################################################################
+
+  vuly_df <- expand.grid(Climate  = BN_pars$Levels$Climate,
+    Discount = BN_pars$Levels$Discount,
+    Valuewater = BN_pars$Levels$Valuewater,
+    Lifespan  = BN_pars$Levels$Lifespan,
+    d = 1:6) %>%
+    as.data.frame() %>% as_data_frame() %>%
+    left_join(syield, by = c("Climate","d")) %>%
+    mutate(AnnB = yield * Valuewater) %>%
+    rowwise() %>%
+    mutate(PVB  = PV_CALCULATE(rep(AnnB, Lifespan), r=Discount),
+           NPV  = PVB - designs$PVCost[d]) %>%
+    ungroup()
+
+
+
+
+################################################################################
+################################################################################
+################################################################################
+
+
+#  save.image(file = "Sept29.Rdata")
+
+
+  st_num  <- 6
+  shape_1 <- 1
+  shape_2 <- 1
+
+  df <- data_frame(x = seq(1/(2*st_num), by = 1/(st_num), length.out = st_num)) %>%
+    mutate(y = dbeta(x, shape_1, shape_2), y = round(y/sum(y),3))
+
+  ggplot(df, aes(x=as.factor(x),y)) +
+    theme_bw() +
+    geom_bar(stat="identity")
 
