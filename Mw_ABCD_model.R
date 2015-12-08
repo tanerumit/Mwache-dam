@@ -5,166 +5,151 @@
 # Date:  September, 2015
 #-----------------------------------------------------------------------------#
 
-  require(lubridate)
-  scripts_folder <- "/Users/Umit/Dropbox/Research/Scripts/"
-  source(paste0(scripts_folder, "HYDROLOGY.R"))
-  source(paste0(scripts_folder, "SCE_OPTIM.R"))
+  source("Mw_Input_pars.R")
+  scripts_dir <- "/Users/Umit/Dropbox/Research/Scripts/"
+  source(paste0(scripts_dir, "PLOTTING.R"))
+  source(paste0(scripts_dir, "WATER_RESOURCES.R"))
+  source(paste0(scripts_dir, "SCE_OPTIM.R"))
 
-# Calibration data -------------------------------------------------------------
+# CLIMATE / GAGE DATA ----------------------------------------------------------
 
-  #Dates vector for the monthly climate forcings
-  clim_date  <- seq.Date(as.Date("1950-01-1"), as.Date("1999-12-1"), by="month")
-  #Dates vector for observed monthly streamflow data
-  qobs_date  <- seq.Date(as.Date("1976-06-1"), as.Date("1990-05-1"), by="month")
-  #Dates vector for the selected calibration period
-  calib_date <- seq.Date(as.Date("1978-01-1"), as.Date("1989-12-1"), by="month")
-  #Calibration period
-  index_clim <- which(clim_date %in% calib_date)
-  index_qobs <- which(qobs_date %in% calib_date)
-  
-  #Catchment area (in km2)
-  area <- 2250
-  #Read-in monthly climate forcings (Prec, Tavg, Tmin, Tmax)
-  climate <- read.csv("inputs/historical_met_forcings.csv") %>% tbl_df()
-   #Read-in monthly streamflow time-series (cms) & convert to mm
-  q_obs <- read.csv("inputs/Obs_monthly_flow_cms.csv", skip=1) %>%  tbl_df() %>%
-    mutate(Flow_mm = Flow * 86400 * days_in_month(qobs_date) * 10^3 / (area * 10^6))
+  #Read-in climate forcings, streamflow, and grid precip forcings
+  clim_forcing_data <- read_csv("./Inputs/forcings_princeton.csv")
+  gage_data <- read_csv("./Inputs/flow_gage_cms.csv", skip=1)
+  prec_grid_data <- read_csv("./inputs/grid_monthly_prec_mm.csv")
 
-  #Hydro-met data for calibration period
-  qobs_cal <- q_obs[index_qobs, "Flow_mm"] %>% unlist(use.names = FALSE)
-  prec_cal <- climate[index_clim,  "Prec"] %>% unlist(use.names = FALSE)
-  tavg_cal <- climate[index_clim,  "Tavg"] %>% unlist(use.names = FALSE)
-  tmax_cal <- climate[index_clim,  "Tmax"] %>% unlist(use.names = FALSE)
-  tmin_cal <- climate[index_clim,  "Tmin"] %>% unlist(use.names = FALSE)
-  tdif_cal <- tmax_cal - tmin_cal
+  #Climate forcings
+  clim <- clim_forcing_data %>%
+    mutate(Date = as.Date(paste(Year, Month,"1", sep="-")),
+           Tdif = Tmax - Tmin,
+           PE = HARGREAVES(Date, Tavg, Tdif, BasinLat)) %>%
+    select(Date, Prec:Tmin, Tdif, PE)
 
-  #Calculate PET with the Hargreaves equation (mm/month)
-  PE_cal <- HARGREAVES(calib_date, tavg_cal, tdif_cal, BasinLat = 3.5) %>%
-    unlist(use.names = FALSE)
+  #Read-in monthly streamflow time-series (cms) & convert to mm
+  gage <- gage_data %>%
+    mutate(Date = as.Date(paste(Year, Month,"1", sep = "-")),
+      Q_obs_mm = Flow_obs * (86.4 * days_in_month(month(Date))) /area,
+      Q_int_mm = Flow_int * (86.4 * days_in_month(month(Date))) /area) %>%
+    select(Date, Q_obs_mm, Q_int_mm)
+
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++--------
 
 
-# ABCD calibration (Princeton) -------------------------------------------------
+# MODEL CALIBRATION  -----------------------------------------------------------
 
-  #Parameter bounds for the abcd model 
-  lowerb  <- c(0.0000 ,50   ,0.0 ,0.000)
-  upperb  <- c(0.9999 ,5000 ,1.0 ,1.000)
-  par.ini <- c(0.2000 ,200  ,0.7 ,0.002)
- 
-  #Model calibration (metric=Kling Gupta Efficiency (KGE))
-  result <- SCEoptim(
-    ABCD_SCE_CALIBRATE_NO_SNOW,
-    par    = par.ini,
-    P      = prec_cal,
-    PE     = PE_cal,
-    Q.obs  = qobs_cal,
-    metric = "KGE",
-    lower  = lowerb, 
-    upper  = upperb,
-    S_ini  = 1, 
-    G_ini  = 1)
+  #Set abcd model parameter bounds
+  lowerb  <- c(0.0,      15, 0.0, 0.0)
+  upperb  <- c(1.0,     500, 1.0, 0.00001)
+  par.ini <- c(0.0010,  211, 0.9, 0.00005)
+  #par  <- c(1.202155e-03, 2.517880e+02, 9.170601e-01, 1.089352e-04) #(09.2014)
+  #par <- c(0.54988, 293.87242, 0.9, 0.000014)
 
-  #Calibration (September 2015)
-  calib_par <- result$par
-  #calib_par  <- c(1.202155e-03, 2.517880e+02, 9.170601e-01, 1.089352e-04) #(09.2014)
-  #result$par <- c(0.54988, 293.87242, 0.9, 0.000014)
+  #Set the calibration period
+  date_cal_beg <- as.Date("1978-01-1")
+  date_cal_end <- as.Date("1989-12-1")
+  date_cal <- seq.Date(date_cal_beg, date_cal_end, by = "month")
 
-  #Simulate Model and evaluate results
-  qsim_cal <- ABCD_QEST_NO_SNOW(
-    calib_par, 
-    P = prec_cal, 
-    PE = PE_cal, 
-    S_ini = 400, G_ini = 200)
+  #Precipitaton datasets available
+  datasets <- c("CRU", "GPCC", "Princeton")
 
-  gof <- Model_GOF(
-    date = calib_date[-(1:12)],
-    obs  = qobs_cal[-(1:12)],
-    sim  = qsim_cal[-(1:12)],
-    unit = "mm per day")
+  #Calibration parameters
+  calib_pars <- matrix(NA, nrow = 4, ncol =length(datasets))
+  colnames(calib_pars) <- datasets
 
- gof[[1]]$Time_Series
- gof[[1]]$Flow_Duration_Curve
- gof[[1]]$QQ_plot
- gof[[1]]$Monthly_Means
- 
- gof[[2]]$NSE
- gof[[2]]$RMSE
- gof[[2]]$KGE
+  #Loop through each grid-dataset
+  for (i in 1:length(datasets)) {
 
-################################################################################  
-  
-  #Calibration with different data sources
-  prec_dat <- read.csv("./inputs/grid_prec_long_mm.csv") %>% 
-    as_data_frame() %>%
-    select(-X) %>%
-    spread(key = Source, value = value) %>%
-    mutate(Date = hist_dates) %>%
-    filter(Date %in% calib_date)
+    #Select associated data
+    prec_i <- filter(prec_grid_data, Source == datasets[i]) %>%
+      select(value) %>% rowSums()
 
- result <- list()
- cal_pars <- array(0, dim = c(4, ncol(prec_dat)-1))
- qsim_lst <- array(0, dim = c(length(prec_cal), ncol(prec_dat)-1))
- KGE_lst  <- list()
- 
- #write.csv(x = cal_pars, file = "met_cal_pars.csv") 
- 
-  for (i in 1:3) {
-   
-    #Model calibration 
-    result[[i]] <- SCEoptim(
-      ABCD_SCE_CALIBRATE_NO_SNOW,
-      par    = par.ini,
-      P      = unlist(prec_dat[, i+1], use.names = FALSE),
-      PE     = PE_cal,
-      Q.obs  = qobs_cal,
-      metric = "KGE",
-      lower  = lowerb, 
-      upper  = upperb,
-      S_ini  = 1, 
-      G_ini  = 1) 
-  
-    cal_pars[,i] <- result[[i]]$par
-    
-    #Simulated streamflow
-    qsim_lst[, i] <- ABCD_QEST_NO_SNOW(
-      parm  = cal_pars[, i], 
-      P     = unlist(prec_dat[, i+1], use.names = FALSE),
-      PE    = PE_cal, 
-      S_ini = 1, 
-      G_ini = 1)
+    #Append prec data to the climate data table
+    clim <- mutate(clim, Prec = prec_i)
 
-    #GOF measures
-    KGE_lst[[i]] <- Model_GOF(
-      date = calib_date[-(1:12)],
-      obs  = qobs_cal[-(1:12)],
-      sim  = qsim_lst[, i][-(1:12)],
-      unit = "mm per day")
-    
+    #Adjustments for the calibration period
+    clim_cal <- filter(clim, Date %in% date_cal)
+    gage_cal <- filter(gage, Date %in% date_cal)
+
+    #Simulate streamflow (spin-up period only!)
+    spin_up <- 24
+    out <- ABCD_QEST(par.ini, print.all = TRUE, S_ini = 100, G_ini = 2,
+      P = clim_cal$Prec[1:spin_up], PE = clim_cal$PE[1:spin_up])
+
+    #Model calibration (metric=Kling Gupta Efficiency (KGE))
+    result <- SCEoptim(ABCD_CALIBRATE, par = par.ini, na.rm = FALSE,
+      P = clim_cal$Prec[-c(1:spin_up)], PE = clim_cal$PE[-c(1:spin_up)],
+      Q.obs = gage_cal$Q_int_mm[-c(1:spin_up)],
+      metric = "KGE",lower = lowerb, upper = upperb,
+      S_ini  = out$S[spin_up], G_ini  = out$G[spin_up])
+
+    #Calibration parameters
+    calib_pars[, datasets[i]] <- result$par
+
   }
 
- ################################################################################ 
+  #***********************************************************************
+  #write_csv(x = as.data.frame(calib_pars), "./inputs/calib_pars_11_2015.csv")
+  #***********************************************************************
 
- 
- cal_pars <- read.csv(file = "./inputs/met_calibration_pars.csv") 
- grid_sim_flow <- data_frame(Date = calib_date, CRU = NA, GPCC = NA, Princeton = NA)
- 
- for (i in 1:3) {
- 
- grid_sim_flow[,i+1] <- ABCD_QEST_NO_SNOW(
-   parm  = cal_pars[, i], 
-   P     = unlist(prec_dat[, i+1], use.names = FALSE),
-   PE    = PE_cal, 
-   S_ini = 1, 
-   G_ini = 1)
- }
- 
- grid_sim_flow$Observed <- qobs_cal
- 
- plots <- pl_TimeSeries(date = as.Date(grid_sim_flow$Date), 
-                        text_size = 12,
-                        data = grid_sim_flow[,-1], unit = "mm per month", 
-                        agg_type = "sum", titles = FALSE, Guides = TRUE,
-                        color_set = c("#d7191c", "#a6d96a", "#2c7bb6", "#000000"))
+# CALIBRATION /MET-DATASET PERFORMANCE -----------------------------------------
 
-ggsave(plot = plots$fdc, file = "grid_fdc.png", height = 4, width = 5)
-ggsave(plot = plots$boxplot,  file = "grid_boxplot.png",  height = 5, width = 10) 
-ggsave(plot = plots$Seasonal, file = "grid_seasonal.png", height = 5, width = 10)
+  #Load calibration parameters
+  q_estimate <- list()
+  calib_pars <- read.csv("./inputs/calib_pars_11_2015.csv")
+
+  #Choose dataset
+  for (i in 1:length(datasets)) {
+
+    #Select associated data
+    prec_i <- filter(prec_grid_data, Source == datasets[i]) %>%
+      select(value) %>% rowSums()
+
+    #Append prec data to the climate data table
+    clim_sim <- mutate(clim, Prec = prec_i) %>% filter(!is.na(Prec))
+
+    #Parameters
+    pars <- calib_pars[, datasets[i]]
+
+    #Adjustments for the calibration period
+    q_estimate[[datasets[i]]] <- clim_sim %>%
+      mutate(Q_sim = ABCD_QEST(pars, S_ini  = 100, G_ini  = 2,
+        P = clim_sim$Prec, PE = clim_sim$PE))
+  }
+
+  ### 1. CHECK CALIBRATION PERFORMANCES
+  #calibration period
+  date_cal_beg <- as.Date("1980-01-1")
+  date_cal_end <- as.Date("1989-12-1")
+  date_cal <- seq.Date(date_cal_beg, date_cal_end, by = "month")
+
+  dataset_i <- "CRU"
+  Q_obs <- gage %>% filter(Date %in% date_cal) %>% select(Q_int_mm) %>% rowSums()
+  Q_sim <- q_estimate[[dataset_i]] %>% filter(Date %in% date_cal) %>%
+    select(Q_sim) %>% rowSums()
+
+  GOF <- Model_GOF(Date = date_cal, Observed = Q_obs, Simulated = Q_sim)
+  GOF[[1]][[3]]
+  GOF[[2]]
+
+  #Long-term simulation to check "trends"
+  pars <- calib_pars[, dataset_i]
+  q_est <- ABCD_QEST(pars, print.all = F, S_ini = 100, G_ini = 2,
+    P = clim_sim$Prec, PE = clim_sim$PE)
+  df <- mutate(clim_sim, q_est = q_est)
+  p  <- ggplot(df, aes(x = Date, y = q_est)) + geom_line(); p
+
+  grid_qest <- bind_rows(q_estimate, .id = "Dataset") %>%
+    filter(Date %in% date_cal) %>%
+    select(Dataset, Date, Q_sim) %>%
+    spread(key = Dataset, value = Q_sim)
+
+
+  pl <- GG_TimeSeries(date = grid_qest$Date,
+    font.size = 12, data = grid_qest[,-1], unit = "mm",
+    agg = "sum", color_set = c("#d7191c", "#a6d96a", "#2c7bb6", "#000000"))
+
+  #ggsave(plot = pl$fdc, file = "grid_fdc.png", height = 4, width = 5)
+  #ggsave(plot = pl$boxplot, file = "grid_boxplot.png",  height = 5, width = 10)
+  #ggsave(plot = pl$Seasonal, file = "grid_seasonal.png", height = 5, width = 10)
+
+# ------------------------------------------------------------------------------
