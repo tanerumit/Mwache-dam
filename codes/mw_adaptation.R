@@ -5,13 +5,11 @@
 # Date:  April, 2016
 #------------------------------------------------------------------------------#
 
-  library(lubridate)
-
-  #Only for paralell processing *****
   library(foreach)
   library(doParallel)
+  library(lubridate)
 
-  # required parameters for the analysis
+# required parameters for the analysis
   source("./Codes/Mw_input.R")
 
 # GCM-based likelihoods
@@ -932,7 +930,6 @@
   p <- plot_grid(p_i, legend_b, rel_widths = c(1,.2)); p
   ggsave(filename = "dry_year_bufferC.tiff", plot = p, width = 7, height = 5)
 
-  #################################################
   #DRY-YEAR QUANTILES
 
   #Average deficit
