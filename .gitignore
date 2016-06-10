@@ -5,14 +5,8 @@
 .RData
 .Rprofile
 .DS_Store
-
-Figures
-Inputs
-Placeholder
-Progress
-RDATA
-Reports
-Repository
-Thrashed
-
-
+thrash
+outputs
+data bulk
+repository
+reports
