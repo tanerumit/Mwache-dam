@@ -1,0 +1,18 @@
+"Crop coefficients for the planned irrigatation areas in the vicinity of Mwache Dam (Table 9-2, Mwache Dam Final Design Report, Chapter 9) - UPDATED",,,,,,,,,,,,,,,,,
+Season,Type,c,Area_ha,Method,Efficiency,Jun,Jul,Aug,Sep,Oct,Nov,Dec,Jan,Feb,Mar,Apr,May
+LS,Cereals,Maize,300,sprinkler,50,1.2,1.2,0.6,0,0,0,0,0,0,0,0.3,0.9
+LS,Cereals,Green_gram,160,sprinkler,50,1.05,0.6,0,0,0,0,0,0,0,0,0.4,0.9
+LS,Cereals,Cowpeas,160,Drip,68,1.05,0.6,0,0,0,0,0,0,0,0,0.4,0.9
+LS,Vegetables,Tomato,240,Drip,68,1.15,0.9,0,0,0,0,0,0,0,0,0.6,0.8
+LS,Vegetables,Capsicum,240,Drip,68,1,0.95,0,0,0,0,0,0,0,0,0.7,0.8
+LS,Vegetables,Amranth,200,Drip,68,1,0.95,0,0,0,0,0,0,0,0,0.7,0.8
+LS,Fruits,Watermelon,200,Drip,68,1.15,0.9,0,0,0,0,0,0,0,0,0.6,0.8
+SS,Cereals,Maize,160,sprinkler,50,0,0,0,0,0.1,0.3,1,1.2,0.6,0,0,0
+SS,Cereals,Green_gram,240,sprinkler,50,0,0,0,0,0.1,0.4,1.05,0.65,0,0,0,0
+SS,Cereals,Cowpeas,280,Drip,68,0,0,0,0,0.1,0.4,1.05,0.65,0,0,0,0
+SS,Vegetables,Tomato,200,Drip,68,0,0,0,0,0.1,0.6,1.15,1.15,0.6,0,0,0
+SS,Vegetables,Capsicum,200,Drip,68,0,0,0,0,0.1,0.7,1,1,0.6,0,0,0
+SS,Vegetables,Amranth,240,Drip,68,0,0,0,0,0.1,0.7,1,1,0.5,0,0,0
+SS,Fruits,Watermelon,80,Drip,68,0,0,0,0,0.1,0.6,1.15,1.15,0.6,0,0,0
+Ann,Fruits,Banana,200,Drip,68,1.18,1.19,1.2,1.2,1.2,1.2,1.2,1.18,1.15,1.1,1,1.15
+Ann,Fruits,Mango,700,Drip,68,1.2,1.2,1.2,1.2,1.2,1.2,1.2,1.2,1.2,1.2,1,0
