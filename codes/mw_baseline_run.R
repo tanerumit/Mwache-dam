@@ -4,7 +4,7 @@
 #   By      :    Mehmet Umit Taner
 #   Date    :    September 25, 2015
 #   Version :    1.0
-#   Notes   :    This version is only designed to implement baseline analysis
+#   Notes   :    baseline analysis (HISTORICAL CONDITIONS)
 #
 #------------------------------------------------------------------------------#
 
@@ -16,6 +16,7 @@
   name_grid <- names(parm_grid)
 
 # ******************************************************************************
+
 
 # HYDROLOGY SIMULATION ---------------------------------------------------------
 
@@ -62,7 +63,8 @@
   #  spread(key = key, value = Q) %>%
   #  write_csv("Historical_inflows_cms.csv")
 
-# YIELD-RELIABILITY ANALYSIS ------------------------------------------------
+
+# YIELD-RELIABILITY ANALYSIS ---------------------------------------------------
 
   #Yield & environmental demand levels
   yieldT  <- c(seq(50, 130, 10))
@@ -231,6 +233,8 @@
 
 # ******************************************************************************
 
+################################################################################
+
 
 # RESULTS VISUALIZATION --------------------------------------------------------
 
@@ -302,10 +306,6 @@
     theme_set(theme_gray(base_size = 10)) +
     geom_line(size = 1, alpha = 0.5) + labs(x="", y ="MCM") +
     scale_color_discrete(name = "Allocation \nScenario", labels = 1:11);p3
-
-
-
-# ******************************************************************************
 
 # ******************************************************************************
 
